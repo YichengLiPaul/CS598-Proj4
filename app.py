@@ -19,7 +19,7 @@ def load_data():
     
     # Load movies.dat for metadata
     movies_metadata = pd.read_csv(
-        MOVIES_METADATA_URL, sep="::", header=None, engine="python", 
+        MOVIES_METADATA_URL, sep="::", header=None, engine="python", encoding="latin1", 
         names=["MovieID", "Title", "Genres"]
     )
     movies_metadata = movies_metadata[["MovieID", "Title"]]
