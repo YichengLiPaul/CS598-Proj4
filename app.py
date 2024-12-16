@@ -30,11 +30,13 @@ def load_data():
     # Merge all movies with metadata
     all_movies = all_movies.merge(movies_metadata, on="MovieID", how="left")
     
-    # Select the first 100 movies for review
-    top_100_movies = all_movies.head(100)
+    # Select the top 250 movies and randomize 100 for review
+    top_250_movies = all_movies.head(250)
+    top_100_movies = top_250_movies.sample(100, random_state=np.random.randint(0, 10000))
     
     return all_movies, top_100_movies, similarity_matrix, movies_metadata
 
+# Load the data
 all_movies, top_100_movies, similarity_matrix, movies_metadata = load_data()
 
 # Function to get poster URL
@@ -45,6 +47,9 @@ def get_poster_url(movie_id):
 
 # myIBCF function
 def myIBCF(new_user, similarity_matrix, all_movies):
+    """
+    Item-Based Collaborative Filtering Recommendation Function.
+    """
     # Ensure new_user has all movies (fill missing movies with NaN)
     new_user_full = pd.Series(index=similarity_matrix.columns, dtype=float)
     new_user_full.update(new_user)  # Update with ratings provided by the user
@@ -113,8 +118,9 @@ if st.button("Get Recommendations"):
         st.write("No recommendations found. Please rate more movies!")
     else:
         for idx, row in recommendations.iterrows():
-            st.image(get_poster_url(row["MovieID"]), caption=row["Title"], width=120)
+            st.write(f"#{idx + 1}: {row['Title']}")
+            st.image(get_poster_url(row["MovieID"]), width=120)
             if not pd.isna(row["Predicted_Rating"]):
-                st.write(f"#{idx + 1}: {row['Title']} (Predicted rating: {row['Predicted_Rating']:.2f})")
+                st.write(f"Predicted rating: {row['Predicted_Rating']:.2f}")
             else:
-                st.write(f"#{idx + 1}: {row['Title']} (Popular movie fallback)")
+                st.write(f"Popular movie fallback")
