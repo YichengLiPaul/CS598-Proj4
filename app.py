@@ -1,32 +1,41 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
 
-# File URLs on GitHub
 TOP_100_MOVIES_URL = "https://raw.githubusercontent.com/YichengLiPaul/CS598-Proj4/main/top_100_movies.txt"
 SIMILARITY_MATRIX_URL = "https://raw.githubusercontent.com/YichengLiPaul/CS598-Proj4/main/top_30_similarity_matrix.csv"
+MOVIES_METADATA_URL = "https://liangfgithub.github.io/MovieData/movies.dat?raw=true"
 
-# Load the top 100 movies and similarity matrix
 @st.cache_data
 def load_data():
     # Load top 100 movies (MovieID list)
     top_100_movies = pd.read_csv(TOP_100_MOVIES_URL, header=None, names=["MovieID"])
-    top_100_movies = top_100_movies["MovieID"].tolist()
+    top_100_movies["MovieID"] = top_100_movies["MovieID"].str.replace("m", "", regex=False).astype(int)
 
     # Load similarity matrix
     similarity_matrix = pd.read_csv(SIMILARITY_MATRIX_URL, index_col=0)
-    return top_100_movies, similarity_matrix
+    similarity_matrix.columns = similarity_matrix.columns.str.replace("m", "", regex=False).astype(int)
+    similarity_matrix.index = similarity_matrix.index.str.replace("m", "", regex=False).astype(int)
+    
+    # Load movies.dat for metadata
+    movies_metadata = pd.read_csv(
+        MOVIES_METADATA_URL, sep="::", header=None, engine="python", 
+        names=["MovieID", "Title", "Genres"]
+    )
+    movies_metadata = movies_metadata[["MovieID", "Title"]]
+    movies_metadata["MovieID"] = movies_metadata["MovieID"].astype(int)
+    
+    return top_100_movies, similarity_matrix, movies_metadata
 
-top_100_movies, similarity_matrix = load_data()
+top_100_movies, similarity_matrix, movies_metadata = load_data()
 
-# Function to generate poster URL
 def get_poster_url(movie_id):
     base_url = "https://liangfgithub.github.io/MovieImages/"
     poster_url = f"{base_url}{movie_id}.jpg?raw=true"
     return poster_url
 
-# myIBCF function to recommend top 10 movies
+top_100_movies_with_titles = top_100_movies.merge(movies_metadata, on="MovieID", how="left")
+
 def myIBCF(new_user, similarity_matrix):
     predictions = pd.Series(index=similarity_matrix.columns, dtype=float)
     for movie in similarity_matrix.columns:
@@ -42,20 +51,21 @@ def myIBCF(new_user, similarity_matrix):
                     predictions[movie] = numerator / denominator
     return predictions.dropna().sort_values(ascending=False).head(10)
 
-# Streamlit UI
 st.title("Movie Recommendation System")
 st.write("Rate movies below, and get personalized recommendations!")
 
 # Step 1: Display the top 100 movies for rating
 st.subheader("Please rate the following movies:")
-user_ratings = pd.Series(index=top_100_movies, dtype=float)
+user_ratings = pd.Series(index=top_100_movies_with_titles["MovieID"], dtype=float)
 
-# Use columns to display movies in a grid
-cols = st.columns(5)  # 5 movies per row
-for idx, movie_id in enumerate(top_100_movies):
+# Use columns to display movies in a grid of 5 * 20
+cols = st.columns(5)
+for idx, row in top_100_movies_with_titles.iterrows():
+    movie_id = row["MovieID"]
+    movie_title = row["Title"]
     with cols[idx % 5]:
-        st.image(get_poster_url(movie_id), caption=f"Movie ID: {movie_id}", width=120)
-        rating = st.slider(f"Rate {movie_id}", 1, 5, value=0, step=1, key=f"rating_{movie_id}")
+        st.image(get_poster_url(movie_id), caption=movie_title, width=120)
+        rating = st.slider(f"Rate '{movie_title}'", 1, 5, value=0, step=1, key=f"rating_{movie_id}")
         if rating > 0:
             user_ratings[movie_id] = rating
 
@@ -67,6 +77,7 @@ if st.button("Get Recommendations"):
     if recommendations.empty:
         st.write("No recommendations found. Please rate more movies!")
     else:
-        for idx, movie_id in enumerate(recommendations.index):
-            st.image(get_poster_url(movie_id), caption=f"Movie ID: {movie_id}", width=120)
-            st.write(f"#{idx + 1}: Movie ID {movie_id} (Predicted rating: {recommendations[movie_id]:.2f})")
+        recommended_movies = movies_metadata[movies_metadata["MovieID"].isin(recommendations.index)]
+        for idx, row in recommended_movies.iterrows():
+            st.image(get_poster_url(row["MovieID"]), caption=row["Title"], width=120)
+            st.write(f"#{idx + 1}: {row['Title']} (Predicted rating: {recommendations[row['MovieID']]:.2f})")
