@@ -5,17 +5,15 @@ import numpy as np
 # File URLs on GitHub
 TOP_MOVIES_URL = "https://raw.githubusercontent.com/YichengLiPaul/CS598-Proj4/main/top_movies.txt"
 SIMILARITY_MATRIX_URL = "https://raw.githubusercontent.com/YichengLiPaul/CS598-Proj4/main/top_30_similarity_matrix.csv"
-MOVIES_METADATA_URL = "https://liangfgithub.github.io/MovieData/movies.dat?raw=true"  # MovieID -> Title
+MOVIES_METADATA_URL = "https://liangfgithub.github.io/MovieData/movies.dat?raw=true"
 
+# Load data
 @st.cache_data
 def load_data():
     # Load all movies (MovieID list)
     all_movies = pd.read_csv(TOP_MOVIES_URL, header=None, names=["MovieID"])
     all_movies["MovieID"] = all_movies["MovieID"].str.replace("m", "", regex=False).astype(int)
-
-    # Select the first 100 movies for review
-    top_100_movies = all_movies.head(100)
-
+    
     # Load similarity matrix
     similarity_matrix = pd.read_csv(SIMILARITY_MATRIX_URL, index_col=0)
     similarity_matrix.columns = similarity_matrix.columns.str.replace("m", "", regex=False).astype(int)
@@ -23,35 +21,45 @@ def load_data():
     
     # Load movies.dat for metadata
     movies_metadata = pd.read_csv(
-        MOVIES_METADATA_URL, sep="::", header=None, engine="python", encoding="latin1", 
+        MOVIES_METADATA_URL, sep="::", header=None, engine="python", encoding="latin1",
         names=["MovieID", "Title", "Genres"]
     )
     movies_metadata = movies_metadata[["MovieID", "Title"]]
     movies_metadata["MovieID"] = movies_metadata["MovieID"].astype(int)
     
+    # Merge all movies with metadata
+    all_movies = all_movies.merge(movies_metadata, on="MovieID", how="left")
+    
+    # Select the first 100 movies for review
+    top_100_movies = all_movies.head(100)
+    
     return all_movies, top_100_movies, similarity_matrix, movies_metadata
 
 all_movies, top_100_movies, similarity_matrix, movies_metadata = load_data()
 
+# Function to get poster URL
 def get_poster_url(movie_id):
     base_url = "https://liangfgithub.github.io/MovieImages/"
     poster_url = f"{base_url}{movie_id}.jpg?raw=true"
     return poster_url
 
-top_100_movies_with_titles = top_100_movies.merge(movies_metadata, on="MovieID", how="left")
-
 # myIBCF function
 def myIBCF(new_user, similarity_matrix, all_movies):
+    # Ensure new_user has all movies (fill missing movies with NaN)
+    new_user_full = pd.Series(index=similarity_matrix.columns, dtype=float)
+    new_user_full.update(new_user)  # Update with ratings provided by the user
+    
+    # Initialize predictions
     predictions = pd.Series(index=similarity_matrix.columns, dtype=float)
     
-    # Predict ratings for unrated movies
+    # Predict ratings
     for movie in similarity_matrix.columns:
-        if pd.isna(new_user[movie]):  # Only predict for unrated movies
+        if pd.isna(new_user_full[movie]):  # Only predict for unrated movies
             similar_movies = similarity_matrix.loc[movie].dropna()
-            rated_movies = similar_movies.index.intersection(new_user.dropna().index)
+            rated_movies = similar_movies.index.intersection(new_user_full.dropna().index)
             if len(rated_movies) > 0:
                 weights = similar_movies[rated_movies]
-                ratings = new_user[rated_movies]
+                ratings = new_user_full[rated_movies]
                 numerator = (weights * ratings).sum()
                 denominator = weights.sum()
                 if denominator > 0:
@@ -66,9 +74,16 @@ def myIBCF(new_user, similarity_matrix, all_movies):
         # Movies the user hasn't rated yet
         unrated_movies = all_movies[~all_movies["MovieID"].isin(new_user.dropna().index)]
         additional_movies = unrated_movies["MovieID"].head(10 - len(top_recommendations))
-        top_recommendations = pd.concat([top_recommendations, pd.Series(index=additional_movies)])
+        for movie_id in additional_movies:
+            top_recommendations.loc[movie_id] = np.nan  # Placeholder score
     
-    return top_recommendations
+    # Merge recommendations with movie titles
+    recommended_movies = pd.DataFrame({
+        "MovieID": top_recommendations.index,
+        "Predicted_Rating": top_recommendations.values
+    }).merge(movies_metadata, on="MovieID", how="left")
+    
+    return recommended_movies
 
 # Streamlit UI
 st.title("Movie Recommendation System")
@@ -76,11 +91,11 @@ st.write("Rate movies below, and get personalized recommendations!")
 
 # Step 1: Display the first 100 movies for rating
 st.subheader("Please rate the following movies:")
-user_ratings = pd.Series(index=top_100_movies_with_titles["MovieID"], dtype=float)
+user_ratings = pd.Series(index=top_100_movies["MovieID"], dtype=float)
 
 # Use columns to display movies in a grid
 cols = st.columns(5)  # 5 movies per row
-for idx, row in top_100_movies_with_titles.iterrows():
+for idx, row in top_100_movies.iterrows():
     movie_id = row["MovieID"]
     movie_title = row["Title"]
     with cols[idx % 5]:
@@ -97,7 +112,9 @@ if st.button("Get Recommendations"):
     if recommendations.empty:
         st.write("No recommendations found. Please rate more movies!")
     else:
-        recommended_movies = movies_metadata[movies_metadata["MovieID"].isin(recommendations.index)]
-        for idx, row in recommended_movies.iterrows():
+        for idx, row in recommendations.iterrows():
             st.image(get_poster_url(row["MovieID"]), caption=row["Title"], width=120)
-            st.write(f"#{idx + 1}: {row['Title']}")
+            if not pd.isna(row["Predicted_Rating"]):
+                st.write(f"#{idx + 1}: {row['Title']} (Predicted rating: {row['Predicted_Rating']:.2f})")
+            else:
+                st.write(f"#{idx + 1}: {row['Title']} (Popular movie fallback)")
